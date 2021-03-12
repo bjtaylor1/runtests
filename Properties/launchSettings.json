@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RunTests": {
+      "commandName": "Project",
+      "commandLineArgs": "TestTest"
+    }
+  }
+}

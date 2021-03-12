@@ -13,8 +13,10 @@
           </e>
         </e>
       </e>
+      <e p="OutputCollector.cs" t="Include" />
       <e p="packages" t="ExcludeRecursive" />
       <e p="Program.cs" t="Include" />
+      <e p="Resolver.cs" t="Include" />
       <e p="RunTests.csproj" t="IncludeRecursive" />
       <e p="RunTests.sln" t="IncludeFlat" />
       <e p="testTargets.json" t="Include" />
