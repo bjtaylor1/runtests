@@ -1,6 +1,5 @@
 using System;
-using System.Collections.Generic;
-using System.Configuration;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Reflection;
 
@@ -8,18 +7,20 @@ namespace RunTests
 {
     public class Resolver
     {
-        private readonly Dictionary<Type, Func<object>> factory;
+        private readonly ConcurrentDictionary<Type, Func<object>> store = new ConcurrentDictionary<Type, Func<object>>();
 
-        public Resolver(Dictionary<Type, Func<object>> factory)
-        {
-            this.factory = factory;
-        }
+        public void Flush(Type t) => store.TryRemove(t, out _);
+        public void Replace(Type t, Func<object> newVal) => store.AddOrUpdate(t, newVal, (t, old) => newVal);
 
         public object GetObject(Type type)
         {
+            return store.GetOrAdd(type, ObjectFactory)();
+        }
+
+        private Func<object> ObjectFactory(Type type)
+        {
             try
             {
-                if (factory.TryGetValue(type, out var s)) return s();
                 var constructors = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
                 var constructor = constructors.OrderBy(c => c.GetParameters().Length).FirstOrDefault();
                 if (constructor == null)
@@ -29,7 +30,7 @@ namespace RunTests
 
                 var parameters = constructor.GetParameters();
                 var parameterValues = parameters.Select(GetParameterValue).ToArray();
-                return constructor.Invoke(parameterValues);
+                return () => constructor.Invoke(parameterValues);
             }
             catch (Exception e)
             {
@@ -39,7 +40,7 @@ namespace RunTests
 
         private object GetParameterValue(ParameterInfo parameterInfo)
         {
-            if (factory.TryGetValue(parameterInfo.ParameterType, out var s)) return s();
+            if (store.TryGetValue(parameterInfo.ParameterType, out var s)) return s();
             
             if (parameterInfo.HasDefaultValue)
             {

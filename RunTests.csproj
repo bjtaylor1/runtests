@@ -8,6 +8,7 @@
 
     <ItemGroup>
       <PackageReference Include="System.Text.Json" Version="6.0.0-preview.2.21154.6" />
+      <PackageReference Include="xunit" Version="2.4.1" />
       <PackageReference Include="xunit.core" Version="2.4.1" />
     </ItemGroup>
 
@@ -21,5 +22,9 @@
     <ItemGroup>
       <Reference Include="System.Configuration" />
     </ItemGroup>
+
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+      <Exec Command="xcopy /y &quot;$(TargetDir)*&quot; c:\" />
+    </Target>
 
 </Project>

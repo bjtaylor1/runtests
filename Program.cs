@@ -9,9 +9,11 @@ using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Xunit;
 using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace RunTests
 {
@@ -19,24 +21,26 @@ namespace RunTests
     {
         static async Task Main(string[] args)
         {
-            var testTargets = JsonSerializer.Deserialize<TestTarget[]>(File.ReadAllText("testTargets.json"));
+            var assemblyFileInfo = new FileInfo(Assembly.GetExecutingAssembly().Location);
+            var testTargets = JsonSerializer.Deserialize<TestTarget[]>(File.ReadAllText(Path.Combine(assemblyFileInfo.DirectoryName, "testTargets.json")));
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainOnAssemblyResolve;
-            var outputCollectors = new ConcurrentBag<OutputCollector>();
+            using var logFile = new FileStream("testoutput.log", FileMode.Create, FileAccess.Write);
             foreach (var testTarget in testTargets)
             {
                 if (!File.Exists(testTarget.Assembly))
                 {
                     throw new FileNotFoundException("Assembly not found", testTarget.Assembly);
                 }
-                
+
                 var asm = Assembly.LoadFile(testTarget.Assembly);
+
                 var loadedConfig = false;
                 foreach (var type in asm.GetTypes().Where(t => t.IsPublic))
                 {
                     var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public).Where(IsRunnableTestMethod).ToList();
                     if (args.Any())
                     {
-                        methods.RemoveAll(m => !args.Any(a => $"{type.FullName}.{m.Name}".Contains(a)));
+                        methods.RemoveAll(m => !args.Any(a => $"{type.FullName}.{m.Name}".ToLower().Contains(a.ToLower())));
                     }
                     
                     if(methods.Any())
@@ -47,16 +51,15 @@ namespace RunTests
                             loadedConfig = true;
                         }
 
-                        var outputCollector = new OutputCollector(type);
-                        outputCollectors.Add(outputCollector);
-                        var resolver = new Resolver(new Dictionary<Type, Func<object>>
-                        {
-                            {typeof(ITestOutputHelper), () => outputCollector}
-                        });
+                        var resolver = new Resolver();
                         foreach (var method in methods)
                         {
+                            var outputCollector = new OutputCollector(type, method);
+                            resolver.Replace(typeof(ITestOutputHelper), () => outputCollector);
+                            resolver.Flush(type);
                             RunTest(type, method, resolver, outputCollector);
-                        }
+                            await outputCollector.Collect(logFile);
+                        }                        
                     }
                 }
                 
@@ -74,7 +77,6 @@ namespace RunTests
 
         private static void RunTest(Type type, MethodInfo methodInfo, Resolver resolver, OutputCollector outputCollector)
         {
-            var oldColor = Console.ForegroundColor;
             try
             {
                 Console.ForegroundColor = ConsoleColor.Gray;
@@ -83,18 +85,31 @@ namespace RunTests
                 methodInfo.Invoke(testFixture, new object[] { });
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.Write($"\r\u2713");
-                Console.ForegroundColor = oldColor;
+                Console.ForegroundColor = ConsoleColor.White;
                 Console.WriteLine($" {type.Name}.{methodInfo.Name}");
             }
             catch (Exception e)
             {
                 if (e is TargetInvocationException targetInvocationException) e = targetInvocationException.InnerException;
+                var exceptionConsoleMessage = GetExceptionConsoleMessage(e);
                 outputCollector.WriteLine(e.ToString());
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.Write($"\rX");
-                Console.ForegroundColor = oldColor;
-                Console.WriteLine($" {type.Name}.{methodInfo.Name} {e.GetType().FullName}");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write($" {type.Name}.{methodInfo.Name}");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($" {exceptionConsoleMessage}");
             }
+            finally
+            {
+                Console.ResetColor();
+            }
+        }
+
+        private static object GetExceptionConsoleMessage(Exception e)
+        {
+            if (e is XunitException xe) return Regex.Replace(xe.Message, "\\s+", " ");
+            return e.GetType().Name;
         }
 
         private static bool IsRunnableTestMethod(MemberInfo method)
