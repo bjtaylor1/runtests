@@ -10,6 +10,7 @@ namespace RunTests
     {
         private readonly Type type;
         private readonly MethodInfo method;
+        private readonly string suffix;
         private readonly StringWriter stringWriter = new StringWriter();
         private bool hasWritten = false;
         
@@ -25,10 +26,11 @@ namespace RunTests
             hasWritten = true;
         }
 
-        public OutputCollector(Type type, MethodInfo method)
+        public OutputCollector(Type type, MethodInfo method, string suffix)
         {
             this.type = type;
             this.method = method;
+            this.suffix = suffix;
         }
 
         public async Task Collect(Stream outputStream)
@@ -37,7 +39,7 @@ namespace RunTests
             {
                 using var collectStream = new MemoryStream();
                 using var collectStreamWriter = new StreamWriter(collectStream);
-                await collectStreamWriter.WriteLineAsync($"{type.FullName}.{method.Name}:");
+                await collectStreamWriter.WriteLineAsync($"{type.FullName}.{method.Name}{suffix}:");
                 await collectStreamWriter.WriteLineAsync();
                 await collectStreamWriter.WriteLineAsync();
                 await collectStreamWriter.WriteLineAsync(stringWriter.ToString());

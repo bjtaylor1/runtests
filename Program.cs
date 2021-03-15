@@ -37,13 +37,14 @@ namespace RunTests
                 var loadedConfig = false;
                 foreach (var type in asm.GetTypes().Where(t => t.IsPublic))
                 {
-                    var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public).Where(IsRunnableTestMethod).ToList();
+                    var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public).ToList();
                     if (args.Any())
                     {
                         methods.RemoveAll(m => !args.Any(a => $"{type.FullName}.{m.Name}".ToLower().Contains(a.ToLower())));
                     }
+                    var methodsToRun = methods.Where(IsRunnableTestMethod).ToArray();
                     
-                    if(methods.Any())
+                    if(methodsToRun.Any())
                     {
                         if (!loadedConfig)
                         {
@@ -51,15 +52,23 @@ namespace RunTests
                             loadedConfig = true;
                         }
 
+                        Console.ForegroundColor = ConsoleColor.White;
+                        await Console.Out.WriteLineAsync($"{type.Name}:");
+                        Console.ResetColor();
+
                         var resolver = new Resolver();
-                        foreach (var method in methods)
+                        foreach (var method in methodsToRun)
                         {
-                            var outputCollector = new OutputCollector(type, method);
-                            resolver.Replace(typeof(ITestOutputHelper), () => outputCollector);
-                            resolver.Flush(type);
-                            RunTest(type, method, resolver, outputCollector);
-                            await outputCollector.Collect(logFile);
-                        }                        
+                            foreach (var paramSet in GetParametersToRunWith(method))
+                            {
+                                var outputCollector = new OutputCollector(type, method, paramSet.Suffix);
+                                resolver.Replace(typeof(ITestOutputHelper), () => outputCollector);
+                                resolver.Flush(type);
+                                RunTest(type, method, paramSet.Parameters, resolver, outputCollector, paramSet.Suffix);
+                                await outputCollector.Collect(logFile);
+                            }
+                        }
+                        await Console.Out.WriteLineAsync();
                     }
                 }
                 
@@ -75,18 +84,18 @@ namespace RunTests
             }
         }
 
-        private static void RunTest(Type type, MethodInfo methodInfo, Resolver resolver, OutputCollector outputCollector)
+        private static void RunTest(Type type, MethodInfo methodInfo, object[] args, Resolver resolver, OutputCollector outputCollector, string suffix = "")
         {
             try
             {
-                Console.ForegroundColor = ConsoleColor.Gray;
-                Console.Write($"{type.Name}.{methodInfo.Name}...");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write($"  {methodInfo.Name}{suffix}...");
                 var testFixture = resolver.GetObject(type);
-                methodInfo.Invoke(testFixture, new object[] { });
+                methodInfo.Invoke(testFixture, args);
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.Write($"\r\u2713");
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine($" {type.Name}.{methodInfo.Name}");
+                Console.WriteLine($" {methodInfo.Name}{suffix}   ");
             }
             catch (Exception e)
             {
@@ -96,13 +105,15 @@ namespace RunTests
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.Write($"\rX");
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.Write($" {type.Name}.{methodInfo.Name}");
+                Console.Write($" {methodInfo.Name}{suffix}");
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($" {exceptionConsoleMessage}");
             }
             finally
             {
                 Console.ResetColor();
+                outputCollector.WriteLine(string.Empty);
+                outputCollector.WriteLine(string.Empty);
             }
         }
 
@@ -119,6 +130,50 @@ namespace RunTests
             return retval;
         }
 
+        private static IEnumerable<(object[] Parameters, string Suffix)> GetParametersToRunWith(MethodInfo method)
+        {
+            var factAttribute = method.GetCustomAttribute<FactAttribute>();
+            if (factAttribute is TheoryAttribute)
+            {
+                var parameterTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();
+                return method.GetCustomAttributes<DataAttribute>().SelectMany(d =>
+                {
+                    return d.GetData(method).Select(p => (p.Select((pv, i) => ParameterInCorrectType(pv, parameterTypes[i])).ToArray(), GetParametersDescription(p)));
+                });
+            }
+            else
+            {
+                return new[] { ( new object[] { }, string.Empty ) };
+            }  
+        }
+
+        private static object ParameterInCorrectType(object specifiedValue, Type parameterType)
+        {
+            if (specifiedValue == null) return specifiedValue;
+            Type typeToConvertTo;
+            if (parameterType.IsGenericType && parameterType.GetGenericTypeDefinition() == typeof(Nullable<>))
+            {
+                typeToConvertTo = parameterType.GetGenericArguments()[0];
+            }
+            else
+            {
+                typeToConvertTo = parameterType;
+            }
+            return Convert.ChangeType(specifiedValue, typeToConvertTo);
+        }
+
+        private static string GetParametersDescription(object[] parameters)
+        {
+            return $" ({string.Join(", ", parameters.Select(GetParameterDescription))})";
+        }
+
+        private static string GetParameterDescription(object parameter)
+        {
+            if (parameter == null) return "null";
+            if (parameter is string s) return $"\"{s}\"";
+            return parameter.ToString();
+        }
+
         private static Assembly CurrentDomainOnAssemblyResolve(object sender, ResolveEventArgs args)
         {
             var assemblyName = new AssemblyName(args.Name);
@@ -129,10 +184,6 @@ namespace RunTests
                 throw new FileNotFoundException("Dependent assembly not found", resolvedAssemblyFile);
             }
             return Assembly.LoadFile(resolvedAssemblyFile);
-        }
-
-        private static async Task BuildTargets(TestTarget[] targets)
-        {
         }
     }
 

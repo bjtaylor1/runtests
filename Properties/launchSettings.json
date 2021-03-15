@@ -2,7 +2,7 @@
   "profiles": {
     "RunTests": {
       "commandName": "Project",
-      "commandLineArgs": "TestTest"
+      "commandLineArgs": "BenefitCategory"
     }
   }
 }
