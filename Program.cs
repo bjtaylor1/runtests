@@ -84,6 +84,14 @@ namespace RunTests
             }
         }
 
+        private static IEnumerable<MethodInfo> GetClassSetups(Type type) =>
+            type.GetMethods(BindingFlags.Public | BindingFlags.Instance).Where(m => m.GetCustomAttributes().Any(a => new[] {"OneTimeSetUpAttribute"}.Contains(a.GetType().Name))).ToArray();
+
+        private static IEnumerable<MethodInfo> GetMethodSetups(Type type) =>
+            type.GetMethods(BindingFlags.Public | BindingFlags.Instance).Where(m => m.GetCustomAttributes().Any(a => new[] {"SetUpAttribute"}.Contains(a.GetType().Name))).ToArray();
+
+        private static IEnumerable<MethodInfo> GetSetups(Type type) => GetClassSetups(type).Concat(GetMethodSetups(type)); // < class ones first
+
         private static void RunTest(Type type, MethodInfo methodInfo, object[] args, Resolver resolver, OutputCollector outputCollector, string suffix = "")
         {
             try
@@ -91,6 +99,11 @@ namespace RunTests
                 Console.ForegroundColor = ConsoleColor.Cyan;
                 Console.Write($"  {methodInfo.Name}{suffix}...");
                 var testFixture = resolver.GetObject(type);
+                var setups = GetSetups(type).ToArray();
+                foreach (var setup in setups)
+                {
+                    setup.Invoke(testFixture, new object[] { });
+                }
                 methodInfo.Invoke(testFixture, args);
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.Write($"\r\u2713");
@@ -141,7 +154,7 @@ namespace RunTests
             var attributeNames = customAttributes.Select(a => a.GetType().Name);
             var retval = attributeNames.Any(n => new[]
             {
-                "FactAttribute", "RetrySkippableFactAttribute"
+                "FactAttribute", "RetrySkippableFactAttribute", "TestAttribute"
             }.Contains(n));
             return retval;
         }
