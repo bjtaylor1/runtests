@@ -16,6 +16,9 @@
       <e p="OutputCollector.cs" t="Include" />
       <e p="packages" t="ExcludeRecursive" />
       <e p="Program.cs" t="Include" />
+      <e p="Properties" t="Include">
+        <e p="launchSettings.json" t="Include" />
+      </e>
       <e p="Resolver.cs" t="Include" />
       <e p="RunTests.csproj" t="IncludeRecursive" />
       <e p="RunTests.sln" t="IncludeFlat" />

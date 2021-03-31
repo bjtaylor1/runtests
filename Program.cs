@@ -102,6 +102,14 @@ namespace RunTests
                 if (e is TargetInvocationException targetInvocationException) e = targetInvocationException.InnerException;
                 var exceptionConsoleMessage = GetExceptionConsoleMessage(e);
                 outputCollector.WriteLine(e.ToString());
+                var responseContentProperty = e.GetType().GetProperty("ResponseContent", BindingFlags.Public | BindingFlags.Instance);
+                if (responseContentProperty != null && responseContentProperty.PropertyType == typeof(string))
+                {
+                    var responseContent = (string)responseContentProperty.GetValue(e);
+                    outputCollector.WriteLine("======Response follows======");
+                    outputCollector.WriteLine(responseContent);
+                    outputCollector.WriteLine("============================");
+                }
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.Write($"\rX");
                 Console.ForegroundColor = ConsoleColor.White;
@@ -119,20 +127,28 @@ namespace RunTests
 
         private static object GetExceptionConsoleMessage(Exception e)
         {
-            if (e is XunitException xe) return Regex.Replace(xe.Message, "\\s+", " ");
+            if (e is XunitException || "ShouldAssertException".Equals(e.GetType().Name))
+                return Regex.Replace(e.Message, "\\s+", " ")
+                    .Replace("Shouldly uses your source code to generate its great error messages, build your test project with full debug information to get better error messages", "")
+                    .Trim();
             return e.GetType().Name;
         }
 
         private static bool IsRunnableTestMethod(MemberInfo method)
         {
             //might want to add 'Theory'
-            var retval = method.GetCustomAttribute<FactAttribute>() != null;
+            var customAttributes = method.GetCustomAttributes().ToArray();
+            var attributeNames = customAttributes.Select(a => a.GetType().Name);
+            var retval = attributeNames.Any(n => new[]
+            {
+                "FactAttribute", "RetrySkippableFactAttribute"
+            }.Contains(n));
             return retval;
         }
 
         private static IEnumerable<(object[] Parameters, string Suffix)> GetParametersToRunWith(MethodInfo method)
         {
-            var factAttribute = method.GetCustomAttribute<FactAttribute>();
+            var factAttribute = method.GetCustomAttribute<FactAttribute>(inherit: true);
             if (factAttribute is TheoryAttribute)
             {
                 var parameterTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();

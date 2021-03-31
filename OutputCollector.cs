@@ -37,15 +37,19 @@ namespace RunTests
         {
             if (hasWritten)
             {
-                using var collectStream = new MemoryStream();
-                using var collectStreamWriter = new StreamWriter(collectStream);
-                await collectStreamWriter.WriteLineAsync($"{type.FullName}.{method.Name}{suffix}:");
-                await collectStreamWriter.WriteLineAsync();
-                await collectStreamWriter.WriteLineAsync();
-                await collectStreamWriter.WriteLineAsync(stringWriter.ToString());
-                await collectStreamWriter.FlushAsync();
-                collectStream.Seek(0, SeekOrigin.Begin);
-                await collectStream.CopyToAsync(outputStream);
+                var outputString = stringWriter.ToString();
+                if (!string.IsNullOrWhiteSpace(outputString))
+                {
+                    using var collectStream = new MemoryStream();
+                    using var collectStreamWriter = new StreamWriter(collectStream);
+                    await collectStreamWriter.WriteLineAsync($"{type.FullName}.{method.Name}{suffix}:");
+                    await collectStreamWriter.WriteLineAsync();
+                    await collectStreamWriter.WriteLineAsync();
+                    await collectStreamWriter.WriteLineAsync(outputString);
+                    await collectStreamWriter.FlushAsync();
+                    collectStream.Seek(0, SeekOrigin.Begin);
+                    await collectStream.CopyToAsync(outputStream);
+                }
             }
         }
 
