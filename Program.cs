@@ -21,6 +21,8 @@ namespace RunTests
     {
         static async Task Main(string[] args)
         {
+            Console.CancelKeyPress += (sender, eventArgs) => Console.ResetColor();
+
             var assemblyFileInfo = new FileInfo(Assembly.GetExecutingAssembly().Location);
             var testTargets = JsonSerializer.Deserialize<TestTarget[]>(File.ReadAllText(Path.Combine(assemblyFileInfo.DirectoryName, "testTargets.json")));
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainOnAssemblyResolve;
@@ -35,6 +37,7 @@ namespace RunTests
                 var asm = Assembly.LoadFile(testTarget.Assembly);
 
                 var loadedConfig = false;
+                int numPassed = 0, numFailed = 0;
                 foreach (var type in asm.GetTypes().Where(t => t.IsPublic))
                 {
                     var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public).ToList();
@@ -64,14 +67,19 @@ namespace RunTests
                                 var outputCollector = new OutputCollector(type, method, paramSet.Suffix);
                                 resolver.Replace(typeof(ITestOutputHelper), () => outputCollector);
                                 resolver.Flush(type);
-                                RunTest(type, method, paramSet.Parameters, resolver, outputCollector, paramSet.Suffix);
+                                if (RunTest(type, method, paramSet.Parameters, resolver, outputCollector, paramSet.Suffix))
+                                    numPassed++;
+                                else numFailed++;
                                 await outputCollector.Collect(logFile);
                             }
                         }
                         await Console.Out.WriteLineAsync();
                     }
                 }
-                
+
+                if (numFailed > 0) Console.ForegroundColor = ConsoleColor.Red; else Console.ForegroundColor = ConsoleColor.Green;
+                await Console.Out.WriteLineAsync($"Passed: {numPassed} Failed: {numFailed}");
+                Console.ResetColor();
             }            
         }
 
@@ -92,7 +100,7 @@ namespace RunTests
 
         private static IEnumerable<MethodInfo> GetSetups(Type type) => GetClassSetups(type).Concat(GetMethodSetups(type)); // < class ones first
 
-        private static void RunTest(Type type, MethodInfo methodInfo, object[] args, Resolver resolver, OutputCollector outputCollector, string suffix = "")
+        private static bool RunTest(Type type, MethodInfo methodInfo, object[] args, Resolver resolver, OutputCollector outputCollector, string suffix = "")
         {
             try
             {
@@ -109,6 +117,7 @@ namespace RunTests
                 Console.Write($"\r\u2713");
                 Console.ForegroundColor = ConsoleColor.White;
                 Console.WriteLine($" {methodInfo.Name}{suffix}   ");
+                return true;
             }
             catch (Exception e)
             {
@@ -129,6 +138,7 @@ namespace RunTests
                 Console.Write($" {methodInfo.Name}{suffix}");
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($" {exceptionConsoleMessage}");
+                return false;
             }
             finally
             {
