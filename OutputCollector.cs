@@ -37,7 +37,7 @@ namespace RunTests
         {
             if (hasWritten)
             {
-                var outputString = stringWriter.ToString();
+                var outputString = stringWriter.ToString().Replace("\\r\\n", "\r\n");
                 if (!string.IsNullOrWhiteSpace(outputString))
                 {
                     using var collectStream = new MemoryStream();

@@ -11,9 +11,10 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Xunit;
 using Xunit.Abstractions;
 using Xunit.Sdk;
+using DataAttribute = Xunit.Sdk.DataAttribute;
+using TheoryAttribute = Xunit.TheoryAttribute;
 
 namespace RunTests
 {
@@ -24,9 +25,25 @@ namespace RunTests
             Console.CancelKeyPress += (sender, eventArgs) => Console.ResetColor();
 
             var assemblyFileInfo = new FileInfo(Assembly.GetExecutingAssembly().Location);
-            var testTargets = JsonSerializer.Deserialize<TestTarget[]>(File.ReadAllText(Path.Combine(assemblyFileInfo.DirectoryName, "testTargets.json")));
+            if (args.Length < 1)
+            {
+                await Console.Out.WriteLineAsync("Usage: runtests targets.json [filter1] [filter2] (filters are ANDed together - to OR, use a pipe in a regex)");
+            }
+            var testTargets = JsonSerializer.Deserialize<TestTarget[]>(File.ReadAllText(Path.Combine(assemblyFileInfo.DirectoryName, args[0])));
+            var filters = args.Skip(1).ToArray();
+
+            if (filters.Any())
+            {
+                await Console.Out.WriteLineAsync("Using filters:");
+                foreach (var filter in filters)
+                {
+                    await Console.Out.WriteLineAsync(filter);
+                }
+            }
+
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainOnAssemblyResolve;
             using var logFile = new FileStream("testoutput.log", FileMode.Create, FileAccess.Write);
+            int numPassed = 0, numFailed = 0;
             foreach (var testTarget in testTargets)
             {
                 if (!File.Exists(testTarget.Assembly))
@@ -37,13 +54,12 @@ namespace RunTests
                 var asm = Assembly.LoadFile(testTarget.Assembly);
 
                 var loadedConfig = false;
-                int numPassed = 0, numFailed = 0;
                 foreach (var type in asm.GetTypes().Where(t => t.IsPublic))
                 {
                     var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public).ToList();
-                    if (args.Any())
+                    if (filters.Any())
                     {
-                        methods.RemoveAll(m => !args.Any(a => $"{type.FullName}.{m.Name}".ToLower().Contains(a.ToLower())));
+                        methods.RemoveAll(m => !filters.All(a => Regex.IsMatch($"{type.FullName}.{m.Name}", a, RegexOptions.IgnoreCase)));
                     }
                     var methodsToRun = methods.Where(IsRunnableTestMethod).ToArray();
                     
@@ -67,7 +83,7 @@ namespace RunTests
                                 var outputCollector = new OutputCollector(type, method, paramSet.Suffix);
                                 resolver.Replace(typeof(ITestOutputHelper), () => outputCollector);
                                 resolver.Flush(type);
-                                if (RunTest(type, method, paramSet.Parameters, resolver, outputCollector, paramSet.Suffix))
+                                if (RunTest(type, method, paramSet.Parameters.ToArray(), resolver, outputCollector, paramSet.Suffix))
                                     numPassed++;
                                 else numFailed++;
                                 await outputCollector.Collect(logFile);
@@ -76,11 +92,11 @@ namespace RunTests
                         await Console.Out.WriteLineAsync();
                     }
                 }
+            }
 
-                if (numFailed > 0) Console.ForegroundColor = ConsoleColor.Red; else Console.ForegroundColor = ConsoleColor.Green;
-                await Console.Out.WriteLineAsync($"Passed: {numPassed} Failed: {numFailed}");
-                Console.ResetColor();
-            }            
+            if (numFailed > 0) Console.ForegroundColor = ConsoleColor.Red; else Console.ForegroundColor = ConsoleColor.Green;
+            await Console.Out.WriteLineAsync($"Passed: {numPassed} Failed: {numFailed}");
+            Console.ResetColor();
         }
 
         private static void LoadConfig(Assembly asm)
@@ -129,7 +145,11 @@ namespace RunTests
                 {
                     var responseContent = (string)responseContentProperty.GetValue(e);
                     outputCollector.WriteLine("======Response follows======");
-                    outputCollector.WriteLine(responseContent);
+                    var responseContentLines = Regex.Split(responseContent, @"\\r\\n|\r\n", RegexOptions.Multiline).ToArray();  //could be an actual \r\n, or could be a literal
+                    foreach (var line in responseContentLines)
+                    {
+                        outputCollector.WriteLine(line);
+                    }
                     outputCollector.WriteLine("============================");
                 }
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -159,31 +179,55 @@ namespace RunTests
 
         private static bool IsRunnableTestMethod(MemberInfo method)
         {
-            //might want to add 'Theory'
             var customAttributes = method.GetCustomAttributes().ToArray();
             var attributeNames = customAttributes.Select(a => a.GetType().Name);
             var retval = attributeNames.Any(n => new[]
             {
-                "FactAttribute", "RetrySkippableFactAttribute", "TestAttribute"
+                "FactAttribute", "RetrySkippableFactAttribute", "TestAttribute", "TestCaseAttribute", "TheoryAttribute"
             }.Contains(n));
             return retval;
         }
 
-        private static IEnumerable<(object[] Parameters, string Suffix)> GetParametersToRunWith(MethodInfo method)
+        private static IEnumerable<(List<object> Parameters, string Suffix)> GetParametersToRunWith(MethodInfo method)
         {
-            var factAttribute = method.GetCustomAttribute<FactAttribute>(inherit: true);
-            if (factAttribute is TheoryAttribute)
+            var parametersNoDefaults = GetParametersToRunWithNoDefaults(method).ToList();
+            var parametersRequired = method.GetParameters();
+            foreach (var parameter in parametersNoDefaults)
             {
-                var parameterTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();
-                return method.GetCustomAttributes<DataAttribute>().SelectMany(d =>
+                for (int i = parameter.Parameters.Count; i < parametersRequired.Length; i++)
                 {
-                    return d.GetData(method).Select(p => (p.Select((pv, i) => ParameterInCorrectType(pv, parameterTypes[i])).ToArray(), GetParametersDescription(p)));
-                });
+                    if (!parametersRequired[i].HasDefaultValue)
+                    {
+                        throw new InvalidOperationException($"Parameter {i} not specified and has no default value");
+                    }
+
+                    parameter.Parameters.Add(parametersRequired[i].DefaultValue);
+                }
+            }
+            return parametersNoDefaults;
+        }
+
+        private static IEnumerable<(List<object> Parameters, string Suffix)> GetParametersToRunWithNoDefaults(MethodInfo method)
+        {
+            DataAttribute[] dataAttributes; // xunit 'InlineData'
+            Attribute[] testCaseAttributes;
+            var parameterTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();
+
+            if ((dataAttributes = method.GetCustomAttributes<DataAttribute>(inherit: true).ToArray()).Any())
+            {
+                return dataAttributes.SelectMany(d => { return d.GetData(method).Select(p => (p.Select((pv, i) => ParameterInCorrectType(pv, parameterTypes[i])).ToList(), GetParametersDescription(p))); });
+            }
+            else if ((testCaseAttributes = method.GetCustomAttributes().Where(t => t.GetType().Name == "TestCaseAttribute").ToArray()).Any())
+            {
+                var argumentsProperty = testCaseAttributes.First().GetType().GetProperty("Arguments", BindingFlags.Instance | BindingFlags.Public);
+                if (argumentsProperty == null) throw new InvalidOperationException("No Arguments property on TestCaseAttribute");
+                object[] TestCaseArguments(Attribute a) => (object[]) argumentsProperty.GetValue(a);
+                return testCaseAttributes.Select(testCase => (TestCaseArguments(testCase).Select((pv, i) => ParameterInCorrectType(pv, parameterTypes[i])).ToList(), GetParametersDescription(TestCaseArguments(testCase)))).ToArray();
             }
             else
             {
-                return new[] { ( new object[] { }, string.Empty ) };
-            }  
+                return new[] {(new List<object>(), string.Empty)};
+            }
         }
 
         private static object ParameterInCorrectType(object specifiedValue, Type parameterType)

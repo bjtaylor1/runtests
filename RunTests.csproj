@@ -14,13 +14,19 @@
 
     <ItemGroup>
       <None Remove="testTargets.json" />
-      <Content Include="testTargets.json">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
     </ItemGroup>
 
     <ItemGroup>
       <Reference Include="System.Configuration" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Include="apitests.json">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+      <Content Include="unittests.json">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
     </ItemGroup>
 
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">
