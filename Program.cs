@@ -128,7 +128,10 @@ namespace RunTests
                 {
                     setup.Invoke(testFixture, new object[] { });
                 }
-                methodInfo.Invoke(testFixture, args);
+                var retval = methodInfo.Invoke(testFixture, args);
+                if (retval is Task t)
+                    t.Wait();
+
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.Write($"\r\u2713");
                 Console.ForegroundColor = ConsoleColor.White;
@@ -138,6 +141,7 @@ namespace RunTests
             catch (Exception e)
             {
                 if (e is TargetInvocationException targetInvocationException) e = targetInvocationException.InnerException;
+                if (e is AggregateException aggregateException && aggregateException.InnerExceptions.Count == 1) e = aggregateException.InnerExceptions.Single();
                 var exceptionConsoleMessage = GetExceptionConsoleMessage(e);
                 outputCollector.WriteLine(e.ToString());
                 var responseContentProperty = e.GetType().GetProperty("ResponseContent", BindingFlags.Public | BindingFlags.Instance);
@@ -158,6 +162,7 @@ namespace RunTests
                 Console.Write($" {methodInfo.Name}{suffix}");
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($" {exceptionConsoleMessage}");
+
                 return false;
             }
             finally
