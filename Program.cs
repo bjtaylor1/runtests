@@ -10,6 +10,7 @@ using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit.Abstractions;
 using Xunit.Sdk;
@@ -42,7 +43,8 @@ namespace RunTests
             }
 
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainOnAssemblyResolve;
-            using var logFile = new FileStream("testoutput.log", FileMode.Create, FileAccess.Write);
+            string logFile = "testoutput.log";
+            if (File.Exists(logFile)) File.Delete(logFile);
             int numPassed = 0, numFailed = 0;
             foreach (var testTarget in testTargets)
             {
@@ -118,8 +120,16 @@ namespace RunTests
 
         private static bool RunTest(Type type, MethodInfo methodInfo, object[] args, Resolver resolver, OutputCollector outputCollector, string suffix = "")
         {
+            var beforeAfterAttributes = type.GetCustomAttributes<BeforeAfterTestAttribute>(true)
+                .Concat(methodInfo.GetCustomAttributes<BeforeAfterTestAttribute>(true))
+                .ToArray();
             try
             {
+                foreach (var beforeAfterAttribute in beforeAfterAttributes)
+                {
+                    beforeAfterAttribute.Before(methodInfo);
+                }
+
                 Console.ForegroundColor = ConsoleColor.Cyan;
                 Console.Write($"  {methodInfo.Name}{suffix}...");
                 var testFixture = resolver.GetObject(type);
@@ -167,6 +177,11 @@ namespace RunTests
             }
             finally
             {
+                foreach (var beforeAfterAttribute in beforeAfterAttributes)
+                {
+                    beforeAfterAttribute.After(methodInfo);
+                }
+
                 Console.ResetColor();
                 outputCollector.WriteLine(string.Empty);
                 outputCollector.WriteLine(string.Empty);

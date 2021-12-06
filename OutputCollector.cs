@@ -33,7 +33,7 @@ namespace RunTests
             this.suffix = suffix;
         }
 
-        public async Task Collect(Stream outputStream)
+        public async Task Collect(string fileName)
         {
             if (hasWritten)
             {
@@ -48,7 +48,8 @@ namespace RunTests
                     await collectStreamWriter.WriteLineAsync(outputString);
                     await collectStreamWriter.FlushAsync();
                     collectStream.Seek(0, SeekOrigin.Begin);
-                    await collectStream.CopyToAsync(outputStream);
+                    using var file = new FileStream(fileName, FileMode.Append);
+                    await collectStream.CopyToAsync(file);
                 }
             }
         }
