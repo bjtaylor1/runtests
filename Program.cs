@@ -44,7 +44,7 @@ namespace RunTests
 
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainOnAssemblyResolve;
             string logFile = "testoutput.log";
-            if (File.Exists(logFile)) File.Delete(logFile);
+            File.WriteAllText(logFile, string.Empty);
             int numPassed = 0, numFailed = 0;
             foreach (var testTarget in testTargets)
             {
